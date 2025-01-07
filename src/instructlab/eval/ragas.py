@@ -6,8 +6,9 @@ from typing import List, Optional, TypedDict
 # Third Party
 from langchain_community.chat_models import ChatOpenAI
 from openai import Client as OpenAIClient
+from openai.types.chat import ChatCompletionMessageParam
 from pandas import DataFrame, read_json
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from ragas.evaluation import EvaluationDataset, EvaluationResult, RunConfig, evaluate
 from ragas.metrics import Metric
 from ragas.metrics._domain_specific_rubrics import (  # the rubrics we must instantiate are located inside of a file marked as private
@@ -56,20 +57,13 @@ class ModelConfig(BaseModel):
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
 
     # "model randomness" aka likelihood of sampling something other than the likeliest token
-    temperature: float = 0.0
+    temperature: float = Field(default=0.0, le=1.0, ge=0.0)
 
     # Max amount of tokens to generate.
     max_tokens: int = 768
 
     # Random seed for reproducibility. Caution: this isn't supported by all model serving runtimes.
     seed: int = DEFAULT_SEED
-
-    @field_validator("temperature")
-    @classmethod
-    def check_temperature(cls, v: float) -> float:
-        if not 0.0 <= v <= 1.0:
-            raise ValueError("temperature must be between 0.0 and 1.0")
-        return v
 
 
 class RagasEvaluator(Evaluator):
@@ -121,11 +115,6 @@ class RagasEvaluator(Evaluator):
         student_model = student_model if student_model else self.student_model
         run_config = run_config if run_config else self.run_config
         openai_client = openai_client if openai_client else self.openai_client
-
-        if not dataset:
-            raise ValueError(
-                "no dataset was provided, please specify the `dataset` argument"
-            )
 
         # ensure we are in the dataframe format
         input_df = None
@@ -196,9 +185,12 @@ class RagasEvaluator(Evaluator):
         updated_df["response"] = ""
 
         for i, qna in updated_df.iterrows():
-            messages = [
-                student_model.system_prompt,
-                qna["user_input"],
+            messages: List[ChatCompletionMessageParam] = [
+                {
+                    "role": "system",
+                    "content": student_model.system_prompt,
+                },
+                {"role": "user", "content": qna["user_input"]},
             ]
             response = openai_client.chat.completions.create(
                 messages=messages,
